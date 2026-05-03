@@ -1,283 +1,311 @@
 package forge.ai.simulation;
 
-import forge.ai.simulation.GameStateEvaluator.Score;
-import forge.game.GameObject;
+import forge.ai.AiDeckStatistics;
+import forge.ai.CreatureEvaluator;
+import forge.card.mana.ManaAtom;
+import forge.game.Game;
 import forge.game.card.Card;
+import forge.game.card.CounterEnumType;
+import forge.game.cost.CostSacrifice;
+import forge.game.phase.PhaseType;
 import forge.game.player.Player;
+import forge.game.spellability.AbilityManaPart;
 import forge.game.spellability.SpellAbility;
+import forge.game.staticability.StaticAbility;
+import forge.game.zone.ZoneType;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
-public class SimulationController {
-    private static boolean DEBUG = false;
-    private static int MAX_DEPTH = 3;
+import static java.lang.Math.max;
+import static java.lang.Math.min;
 
-    private List<Plan.Decision> currentStack;
-    private List<Score> scoreStack;
-    private List<GameSimulator> simulatorStack;
-    private Plan.Decision bestSequence; // last action of sequence
-    private Score bestScore;
-    private List<CachedEffect> effectCache = new ArrayList<>();
-    private GameObject[] currentHostAndTarget;
+public class GameStateEvaluator {
+    private boolean debugging = false;
+    private SimulationCreatureEvaluator eval = new SimulationCreatureEvaluator();
 
-    private static class CachedEffect {
-        final GameObject hostCard;
-        final String sa;
-        final GameObject target;
-        final int targetScore;
-        final int scoreDelta;
-
-        public CachedEffect(GameObject hostCard, SpellAbility sa, GameObject target, int targetScore, int scoreDelta) {
-            this.hostCard = hostCard;
-            this.sa = sa.toString();
-            this.target = target;
-            this.targetScore = targetScore;
-            this.scoreDelta = scoreDelta;
-        }
+    public void setDebugging(boolean debugging) {
+        this.debugging = debugging;
     }
 
-    public SimulationController(Score score) {
-        bestScore = score;
-        scoreStack = new ArrayList<>();
-        scoreStack.add(score);
-        simulatorStack = new ArrayList<>();
-        currentStack = new ArrayList<>();
-    }
-    
-    private int getRecursionDepth() {
-        return scoreStack.size() - 1;
+    private static void debugPrint(String s) {
+        GameSimulator.debugPrint(s);
     }
 
-    public boolean shouldRecurse() {
-        return bestScore.value != Integer.MAX_VALUE && getRecursionDepth() < MAX_DEPTH;
+    private static class CombatSimResult {
+        public GameCopier copier;
+        public Game gameCopy;
     }
-
-    public Plan.Decision getLastDecision() {
-        if (currentStack.isEmpty()) {
+    private CombatSimResult simulateUpcomingCombatThisTurn(final Game evalGame, final Player aiPlayer) {
+        PhaseType phase = evalGame.getPhaseHandler().getPhase();
+        if (phase.isAfter(PhaseType.COMBAT_DAMAGE) || evalGame.isGameOver()) {
             return null;
         }
-        return currentStack.get(currentStack.size() - 1);
-    }
-
-    private Score getCurrentScore() {
-        return scoreStack.get(scoreStack.size() - 1);
-    }
-
-    public void evaluateSpellAbility(List<SpellAbility> saList, int saIndex) {
-        currentStack.add(new Plan.Decision(getCurrentScore(), getLastDecision(), new Plan.SpellAbilityRef(saList, saIndex)));
-    }
-
-    public void evaluateCardChoice(Card choice) {
-        currentStack.add(new Plan.Decision(getCurrentScore(), getLastDecision(), choice));
-    }
-
-    public void evaluateChosenModes(int[] chosenModes, String modesStr) {
-        currentStack.add(new Plan.Decision(getCurrentScore(), getLastDecision(), chosenModes, modesStr));
-    }
-
-    public void evaluateTargetChoices(SpellAbility sa, MultiTargetSelector.Targets targets) {
-        currentStack.add(new Plan.Decision(getCurrentScore(), getLastDecision(), targets));
-    }
-
-    public void doneEvaluating(Score score) {
-        // if we're here during a deeper level this hasn't been called for the level above yet
-        // in such case we need to check that this decision has really lead to the improvement in score
-        if (getLastDecision().initialScore.value < score.value && score.value > bestScore.value) {
-            bestScore = score;
-            bestSequence = getLastDecision();
-        }
-        currentStack.remove(currentStack.size() - 1);
-    }
-
-    public Score getBestScore() {
-        return bestScore;
-    }
-
-    public Plan getBestPlan() {
-        if (!currentStack.isEmpty()) {
-            throw new RuntimeException("getBestPlan() expects currentStack to be empty!");
-        }
-
-        ArrayList<Plan.Decision> sequence = new ArrayList<>();
-        Plan.Decision current = bestSequence;
-        while (current != null) {
-            sequence.add(current);
-            current = current.prevDecision;
-        }
-        Collections.reverse(sequence);
-        // Merge targets & choices into their parents.
-        int writeIndex = 0;
-        for (int i = 0; i < sequence.size(); i++) {
-            Plan.Decision d = sequence.get(i);
-            if (d.saRef != null) {
-                sequence.set(writeIndex, d);
-                writeIndex++;
-            } else if (d.targets != null) {
-                sequence.get(writeIndex - 1).targets = d.targets;
-            } else if (d.choices != null) {
-                Plan.Decision to = sequence.get(writeIndex - 1);
-                if (to.choices == null) {
-                    to.choices = new ArrayList<>();
-                }
-                to.choices.addAll(d.choices);
-            } else if (d.modes != null) {
-                sequence.get(writeIndex - 1).modes = d.modes;
-                sequence.get(writeIndex - 1).modesStr = d.modesStr;
-            }
-        }
-        sequence.subList(writeIndex, sequence.size()).clear();
-        return new Plan(sequence, getBestScore());
-    }
-
-    private Plan.Decision getLastMergedDecision() {
-        MultiTargetSelector.Targets targets = null;
-        List<String> choices = new ArrayList<>();
-        int[] modes = null;
-        String modesStr = null;
-
-        Plan.Decision d = currentStack.get(currentStack.size() - 1);
-        while (d.saRef == null) {
-            if (d.targets != null) {
-                targets = d.targets;
-            } else if (d.choices != null) {
-                // Since we're iterating backwards, add to the front.
-                choices.addAll(0, d.choices);
-            } else if (d.modes != null) {
-                modes = d.modes;
-                modesStr = d.modesStr;
-            }
-            d = d.prevDecision;
-        }
-
-        Plan.Decision merged  = new Plan.Decision(d.initialScore, d.prevDecision, d.saRef);
-        merged.targets = targets;
-        if (!choices.isEmpty()) {
-            merged.choices = choices;
-        }
-        merged.modes = modes;
-        merged.modesStr = modesStr;
-        merged.xMana = d.xMana;
-        return merged;
-    }
-
-    public void push(SpellAbility sa, Score score, GameSimulator simulator) {
-        GameSimulator.debugPrint("Recursing DEPTH=" + getRecursionDepth());
-        GameSimulator.debugPrint("  With: " + sa);
-        scoreStack.add(score);
-        simulatorStack.add(simulator);
-    }
-
-    public void pop(Score score, SpellAbility nextSa) {
-        scoreStack.remove(scoreStack.size() - 1);
-        simulatorStack.remove(simulatorStack.size() - 1);
-        GameSimulator.debugPrint("DEPTH"+getRecursionDepth()+" best score " + score + " " + nextSa);
-    }
-
-    public GameObject[] getOriginalHostCardAndTarget(SpellAbility sa) {
-        SpellAbility saOrSubSa = sa;
-        while (saOrSubSa != null && !saOrSubSa.usesTargeting()) {
-            saOrSubSa = saOrSubSa.getSubAbility();
-        }
-
-        if (saOrSubSa == null || saOrSubSa.getTargets() == null || saOrSubSa.getTargets().size() != 1) {
+        // If the current player has no creatures in play, there won't be any combat. This avoids
+        // an expensive game copy operation.
+        // Note: This is is safe to do because the simulation is based on the current game state,
+        // so there isn't a chance to play creatures in between.
+        if (evalGame.getPhaseHandler().getPlayerTurn().getCreaturesInPlay().isEmpty()) {
             return null;
         }
-        GameObject target = saOrSubSa.getTargets().get(0);
-        GameObject originalTarget = target;
-        if (!(target instanceof Card)) {  return null; }
-        Card hostCard = sa.getHostCard();
-        for (int i = simulatorStack.size() - 1; i >= 0; i--) {
-            if (target == null || hostCard == null) {
-                // This could happen when evaluating something that couldn't exist
-                // in the original game - for example, targeting a token that came
-                // into being as a result of simulating something earlier. Unfortunately,
-                // we can't cache this case.
-                return null;
-            }
-            GameCopier copier = simulatorStack.get(i).getGameCopier();
-            if (copier.getCopiedGame() != hostCard.getGame()) {
-                throw new RuntimeException("Expected hostCard and copier game to match!");
-            }
-            if (copier.getCopiedGame() != ((Card) target).getGame()) {
-                throw new RuntimeException("Expected target and copier game to match!");
-            }
-            target = copier.reverseFind(target);
-            hostCard = (Card) copier.reverseFind(hostCard);
+
+        GameCopier copier = new GameCopier(evalGame);
+        Game gameCopy = copier.makeCopy(null, aiPlayer);
+
+        gameCopy.getPhaseHandler().devAdvanceToPhase(PhaseType.COMBAT_DAMAGE, () -> GameSimulator.resolveStack(gameCopy, aiPlayer.getWeakestOpponent()));
+        CombatSimResult result = new CombatSimResult();
+        result.copier = copier;
+        result.gameCopy = gameCopy;
+        return result;
+    }
+
+    private static String cardToString(Card c) {
+        String str = c.getName();
+        if (c.isCreature()) {
+            str += " " + c.getNetPower() + "/" + c.getNetToughness();
         }
-        return new GameObject[] { hostCard, target, originalTarget };
+        return str;
     }
 
-    public void setHostAndTarget(SpellAbility sa, GameSimulator simulator) {
-        simulatorStack.add(simulator);
-        currentHostAndTarget = getOriginalHostCardAndTarget(sa);
-        simulatorStack.remove(simulatorStack.size() - 1);
+    private Score getScoreForGameOver(Game game, Player aiPlayer) {
+        if (game.getOutcome().getWinningTeam() == aiPlayer.getTeam() ||
+                game.getOutcome().isWinner(aiPlayer.getRegisteredPlayer())) {
+            return new Score(Integer.MAX_VALUE);
+        }
+
+        return new Score(Integer.MIN_VALUE);
     }
 
-    public Score shouldSkipTarget(SpellAbility sa, GameSimulator simulator) {
-        simulatorStack.add(simulator);
-        GameObject[] hostAndTarget = getOriginalHostCardAndTarget(sa);
-        simulatorStack.remove(simulatorStack.size() - 1);
-        if (hostAndTarget != null) {
-            String saString = sa.toString();
-            for (CachedEffect effect : effectCache) {
-                if (effect.hostCard == hostAndTarget[0] && effect.target == hostAndTarget[1] && effect.sa.equals(saString)) {
-                    GameStateEvaluator evaluator = new GameStateEvaluator();
-                    Player player = sa.getActivatingPlayer();
-                    int cardScore = evaluator.evalCard(player.getGame(), player, (Card) hostAndTarget[2]);
-                    if (cardScore == effect.targetScore) {
-                        Score currentScore = getCurrentScore();
-                        // TODO: summonSick score?
-                        return new Score(currentScore.value + effect.scoreDelta, currentScore.summonSickValue);
+    public Score getScoreForGameState(Game game, Player aiPlayer) {
+        if (game.isGameOver()) {
+            return getScoreForGameOver(game, aiPlayer);
+        }
+
+        CombatSimResult result = simulateUpcomingCombatThisTurn(game, aiPlayer);
+        if (result != null) {
+            Player aiPlayerCopy = (Player) result.copier.find(aiPlayer);
+            if (result.gameCopy.isGameOver()) {
+                return getScoreForGameOver(result.gameCopy, aiPlayerCopy);
+            }
+            return getScoreForGameStateImpl(result.gameCopy, aiPlayerCopy);
+        }
+        return getScoreForGameStateImpl(game, aiPlayer);
+    }
+
+    private Score getScoreForGameStateImpl(Game game, Player aiPlayer) {
+        int score = 0;
+        // TODO: more than 2 players
+        // TODO: try and reuse evaluateBoardPosition
+        int myCards = 0;
+        int theirCards = 0;
+        for (Card c : game.getCardsIn(ZoneType.Hand)) {
+            if (c.getController() == aiPlayer) {
+                myCards++;
+            } else {
+                theirCards++;
+            }
+        }
+        debugPrint("My cards in hand: " + myCards);
+        debugPrint("Their cards in hand: " + theirCards);
+        if (!aiPlayer.isUnlimitedHandSize() && myCards > aiPlayer.getMaxHandSize()) {
+            // Count excess cards for less.
+            score += myCards - aiPlayer.getMaxHandSize();
+            myCards = aiPlayer.getMaxHandSize();
+        }
+        // TODO weight cards in hand more if opponent has discard or if we have looting or can bluff a trick
+        score += 5 * myCards - 4 * theirCards;
+        debugPrint("  My life: " + aiPlayer.getLife());
+        score += 2 * aiPlayer.getLife();
+        int opponentIndex = 1;
+        int opponentLife = 0;
+        for (Player opponent : aiPlayer.getOpponents()) {
+            debugPrint("  Opponent " + opponentIndex + " life: -" + opponent.getLife());
+            opponentLife += opponent.getLife();
+            opponentIndex++;
+        }
+        score -= 2* opponentLife / (game.getPlayers().size() - 1);
+
+        // evaluate mana base quality
+        score += evalManaBase(game, aiPlayer, AiDeckStatistics.fromPlayer(aiPlayer));
+        // TODO deal with opponents. Do we want to use perfect information to evaluate their manabase?
+        //int opponentManaScore = 0;
+        //for (Player opponent : aiPlayer.getOpponents()) {
+        //    opponentManaScore += evalManaBase(game, opponent);
+        //}
+        //score -= opponentManaScore / (game.getPlayers().size() - 1);
+
+        // TODO evaluate holding mana open for counterspells
+
+        int summonSickScore = score;
+        PhaseType gamePhase = game.getPhaseHandler().getPhase();
+        for (Card c : game.getCardsIn(ZoneType.Battlefield)) {
+            int value = evalCard(game, aiPlayer, c);
+            int summonSickValue = value;
+            // To make the AI hold-off on playing creatures before MAIN2 if they give no other benefits,
+            // keep track of the score while treating summon sick creatures as having a value of 0.
+            if (gamePhase.isBefore(PhaseType.MAIN2) && c.isSick() && c.getController() == aiPlayer) {
+                summonSickValue = 0;
+            }
+            String str = cardToString(c);
+            if (c.getController() == aiPlayer) {
+                debugPrint("  Battlefield: " + str + " = " + value);
+                score += value;
+                summonSickScore += summonSickValue;
+            } else {
+                debugPrint("  Battlefield: " + str + " = -" + value);
+                score -= value;
+                summonSickScore -= summonSickValue;
+            }
+            String nonAbilityText = c.getNonAbilityText();
+            if (!nonAbilityText.isEmpty()) {
+                debugPrint("    "+nonAbilityText.replaceAll("CARDNAME", c.getName()));
+            }
+        }
+
+        debugPrint("Score = " + score);
+        return new Score(score, summonSickScore);
+    }
+
+    public int evalManaBase(Game game, Player player, AiDeckStatistics statistics) {
+        // TODO should these be fixed quantities or should they be linear out of like 1000/(desired - total)?
+        int value = 0;
+        // get the colors of mana we can produce and the maximum number of pips
+        int max_total = 0;
+        // this logic taken from ManaCost.getColorShardCounts()
+        int[] counts = new int[6]; // in WUBRGC order
+
+        for (Card c : player.getCardsIn(ZoneType.Battlefield)) {
+            int max_produced = 0;
+            for (SpellAbility m: c.getManaAbilities()) {
+                m.setActivatingPlayer(c.getController());
+                int mana_cost = m.getPayCosts().getTotalMana().getCMC();
+                max_produced = max(max_produced, m.amountOfManaGenerated(true) - mana_cost);
+                for (AbilityManaPart mp : m.getAllManaParts()) {
+                    for (String part : mp.mana(m).split(" ")) {
+                        // TODO handle any
+                        int index = ManaAtom.getIndexFromName(part);
+                        if (index != -1) {
+                            counts[index] += 1;
+                        }
                     }
                 }
             }
+            max_total += max_produced;
         }
-        return null;
+
+        // Compare against the maximums in the deck and in the hand
+        // TODO check number of castable cards in hand
+        for (int i = 0; i < counts.length; i++) {
+            // for each color pip, add 100
+            value += Math.min(counts[i], statistics.maxPips[i]) * 100;
+        }
+        // value for being able to cast all the cards in your deck
+        value += min(max_total, statistics.maxCost) * 100;
+
+        // excess mana is valued less than getting enough to use everything
+        value += max(0, max_total - statistics.maxCost) * 5;
+
+        return value;
     }
 
-    public void possiblyCacheResult(Score score, SpellAbility sa) {
-        String cached = "";
+    public int evalCard(Game game, Player aiPlayer, Card c) {
+        if (c.isCreature()) {
+            return eval.evaluateCreature(c);
+        } else if (c.isLand()) {
+            return evaluateLand(c);
+        } else if (c.isEnchantingCard()) {
+            return 0;
+        } else {
+            // TODO treat cards like Captive Audience negative
+            // e.g. a 5 CMC permanent results in 200, whereas a 5/5 creature is ~225
+            int value = 50 + 30 * c.getCMC();
+            if (c.isPlaneswalker()) {
+                value += 2 * c.getCounters(CounterEnumType.LOYALTY);
+            }
+            return value;
+        }
+    }
 
-        // TODO: Why is the check below needed by tests?
-        if (!currentStack.isEmpty()) {
-            Plan.Decision d = currentStack.get(currentStack.size() - 1);
-            int scoreDelta = score.value - d.initialScore.value;
-            // Needed to make sure below is only executed when target decisions are ended.
-            // Also, only cache negative effects - so that in those cases we don't need to
-            // recurse.
-            if (scoreDelta <= 0 && d.targets != null) {
-                // FIXME: Support more than one target in this logic.
-                GameObject[] hostAndTarget = currentHostAndTarget;
-                if (currentHostAndTarget != null) {
-                    GameStateEvaluator evaluator = new GameStateEvaluator();
-                    Player player = sa.getActivatingPlayer();
-                    int cardScore = evaluator.evalCard(player.getGame(), player, (Card) hostAndTarget[2]);
-                    effectCache.add(new CachedEffect(hostAndTarget[0], sa, hostAndTarget[1], cardScore, scoreDelta));
-                    cached = " (added to cache)";
-                }
+    public static int evaluateLand(Card c) {
+        int value = 3;
+        // for each mana color a land generates for free, increase the value by one
+        // for each mana a land can produce, add one hundred.
+        int max_produced = 0;
+        Set<String> colors_produced = new HashSet<>();
+        for (SpellAbility m: c.getManaAbilities()) {
+            m.setActivatingPlayer(c.getController());
+            int mana_cost = m.getPayCosts().getTotalMana().getCMC();
+            max_produced = max(max_produced, m.amountOfManaGenerated(true) - mana_cost);
+            for (AbilityManaPart mp : m.getAllManaParts()) {
+                colors_produced.addAll(Arrays.asList(mp.mana(m).split(" ")));
+            }
+        }
+        value += 100 * max_produced;
+        int size = max(colors_produced.size(), colors_produced.contains("Any") ? 5 : 0);
+        value += size * 3;
+
+        // add a value for each activated ability that the land has that's not an activated ability.
+        // The value should be more than the value of having a card in hand, so if a land has an
+        // activated ability but not a mana ability, it will still be played.
+        for (SpellAbility m: c.getNonManaAbilities()) {
+            if (m.isLandAbility()) {
+                // Land Ability has no extra Score
+                continue;
+            } if (!m.getPayCosts().hasTapCost()) {
+                // probably a manland, rate it higher than a rainbow land
+                value += 25;
+            } else if (m.getPayCosts().hasSpecificCostType(CostSacrifice.class)) {
+                // Sacrifice ability, so not repeatable. Less good than a utility land that gets you ahead
+                value += 10;
+            } else {
+                // Repeatable utility land, probably gets you ahead on board over time.
+                // big value, probably more than a manland
+                value += 50;
             }
         }
 
-        currentHostAndTarget = null;
-        printState(score, sa, cached, true);
+        // Add a value for each static ability that the land has
+        for (StaticAbility s : c.getStaticAbilities()) {
+            // More than the value of having a card in hand. See comment above
+            value += 6;
+        }
+
+        return value;
     }
 
-    public void printState(Score score, SpellAbility origSa, String suffix, boolean useStack) {
-        if (!DEBUG) {
-            return;
+    private class SimulationCreatureEvaluator extends CreatureEvaluator {
+        @Override
+        protected int addValue(int value, String text) {
+            if (debugging && value != 0) {
+                GameSimulator.debugPrint(value + " via " + text);
+            }
+            return super.addValue(value, text);
+        }
+    }
+
+    public static class Score {
+        public final int value;
+        public final int summonSickValue;
+        
+        public Score(int value) {
+            this.value = value;
+            this.summonSickValue = value;
         }
 
-        int recursionDepth = getRecursionDepth();
-        for (int i = 0; i < recursionDepth; i++)
-            System.err.print("  ");
-        String str;
-        if (useStack && !currentStack.isEmpty()) {
-            str = getLastMergedDecision().toString(true);
-        } else {
-            str = SpellAbilityPicker.abilityToString(origSa);
+        public Score(int value, int summonSickValue) {
+            this.value = value;
+            this.summonSickValue = summonSickValue;
         }
-        System.err.println(recursionDepth + ": [" + score.value + "] " + str + suffix);
+
+        public boolean equals(Score other) {
+            if (other == null)
+                return false;
+            return value == other.value && summonSickValue == other.summonSickValue;
+        }
+
+        public String toString() {
+            return value + (summonSickValue != value ? " (ss " + summonSickValue + ")" :"");
+        }
     }
 }
