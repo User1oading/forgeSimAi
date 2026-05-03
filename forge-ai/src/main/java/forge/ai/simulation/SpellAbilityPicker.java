@@ -77,6 +77,15 @@ public class SpellAbilityPicker {
             writeIndex++;
         }
         candidateSAs.subList(writeIndex, candidateSAs.size()).clear();
+        try {
+            candidateSAs.sort(ComputerUtilAbility.saEvaluator);
+        } catch (IllegalArgumentException e) {
+            // same handling as AiController
+        }
+        if (candidateSAs.size() > 7) {
+            candidateSAs = candidateSAs.subList(0, 7);
+        }
+
         return candidateSAs;
     }
 
@@ -167,26 +176,24 @@ public class SpellAbilityPicker {
 
         SpellAbility bestSa = null;
         Score bestSaValue = origGameScore;
-        print("Evaluating... (orig score = " + origGameScore +  ")");
+        print("Evaluating " + candidateSAs.size() + " candidates (orig score = " + origGameScore + ")");
+
         for (int i = 0; i < candidateSAs.size(); i++) {
+            long saStart = System.currentTimeMillis();
             Score value = evaluateSa(controller, phase, candidateSAs, i);
+            System.out.println("[SIM] " + candidateSAs.get(i).getHostCard().getName()
+                    + " score=" + value.value
+                    + " time=" + (System.currentTimeMillis() - saStart) + "ms");
             if (value.value > bestSaValue.value) {
                 bestSaValue = value;
                 bestSa = candidateSAs.get(i);
             }
         }
 
-        // To make the AI hold-off on playing creatures in MAIN1 if they give no other benefits,
-        // check the score for the bestSA while counting summon sick creatures for 0.
-        // Do it here on the best SA, rather than for all evaluations, so that if the best SA
-        // is indeed a creature spell, we don't pick something else to play now and then have
-        // no mana to play the truly best SA post-combat.
-        if (bestSa != null && bestSaValue.summonSickValue <= origGameScore.summonSickValue) {
-            bestSa = null;
-        }
-
         long execTime = System.currentTimeMillis() - startTime;
-        print("BEST: " + abilityToString(bestSa) + " SCORE: " + bestSaValue.summonSickValue + " TIME: " + execTime);
+        System.out.println("[SIM] Total: " + execTime + "ms, " + candidateSAs.size()
+                + " candidates, " + numSimulations + " simulations, depth=" + SimulationController.MAX_DEPTH);
+
         this.bestScore = bestSaValue;
         return bestSa;
     }
