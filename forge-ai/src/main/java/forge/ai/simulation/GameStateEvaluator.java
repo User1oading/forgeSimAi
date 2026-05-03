@@ -210,15 +210,11 @@ public class GameStateEvaluator {
     }
 
     public int evalCard(Game game, Player aiPlayer, Card c) {
-        // TODO: These should be based on other considerations - e.g. in relation to opponents state.
         if (c.isCreature()) {
             return eval.evaluateCreature(c);
         } else if (c.isLand()) {
             return evaluateLand(c);
         } else if (c.isEnchantingCard()) {
-            // TODO: Should provide value in whatever it's enchanting?
-            // Else the computer would think that casting a Lifelink enchantment
-            // on something that already has lifelink is a net win.
             return 0;
         } else {
             // TODO treat cards like Captive Audience negative
