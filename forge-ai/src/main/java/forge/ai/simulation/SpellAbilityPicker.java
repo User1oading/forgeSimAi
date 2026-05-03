@@ -30,10 +30,12 @@ public class SpellAbilityPicker {
 
     private Plan plan;
     private int numSimulations;
+    private int maxCandidates = 7;
 
-    public SpellAbilityPicker(Game game, Player player) {
+    public SpellAbilityPicker(Game game, Player player , int maxCandidates) {
         this.game = game;
         this.player = player;
+        this.maxCandidates = maxCandidates;
     }
 
     public void setInterceptor(SpellAbilityChoicesIterator in) {
@@ -82,8 +84,8 @@ public class SpellAbilityPicker {
         } catch (IllegalArgumentException e) {
             // same handling as AiController
         }
-        if (candidateSAs.size() > 7) {
-            candidateSAs = candidateSAs.subList(0, 7);
+        if (candidateSAs.size() > maxCandidates) {
+            candidateSAs = new ArrayList<>(candidateSAs.subList(0, maxCandidates));
         }
 
         return candidateSAs;
@@ -154,7 +156,8 @@ public class SpellAbilityPicker {
                     candidateSAs2.add(sa);
                 }
             }
-            if (!candidateSAs2.isEmpty()) {
+            int sorceriesFiltered = candidateSAs.size() - candidateSAs2.size();
+            if (!candidateSAs2.isEmpty() && sorceriesFiltered >= 1) {
                 if (printOutput) {
                     System.err.println("Formula plan with phase bloom");
                 }

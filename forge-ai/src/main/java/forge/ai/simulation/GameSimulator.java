@@ -244,9 +244,11 @@ public class GameSimulator {
             printDiff(origLines, simLines);
         }
         controller.possiblyCacheResult(score, origSa);
-        if (controller.shouldRecurse() && !simGame.isGameOver()) {
+        if (controller.shouldRecurse() && !simGame.isGameOver()
+                && score.value != Integer.MIN_VALUE
+                && score.value >= controller.getBestScore().value - Math.max(20, Math.abs(controller.getBestScore().value / 20))) {
             controller.push(sa, score, this);
-            SpellAbilityPicker sim = new SpellAbilityPicker(simGame, aiPlayer);
+            SpellAbilityPicker sim = new SpellAbilityPicker(simGame, aiPlayer, 3);
             SpellAbility nextSa = sim.chooseSpellAbilityToPlay(controller);
             if (nextSa != null) {
                 score = sim.getScoreForChosenAbility();
