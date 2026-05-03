@@ -41,9 +41,6 @@ public class GameSimulator {
         debugPrint = false;
         origScore = eval.getScoreForGameState(origGame, origAiPlayer);
 
-        if (advanceToPhase == null) {
-            ensureGameCopyScoreMatches(origGame, origAiPlayer);
-        }
 
         // If the stack on the original game is not empty, resolve it
         // first and get the updated eval score, since this is what we'll
