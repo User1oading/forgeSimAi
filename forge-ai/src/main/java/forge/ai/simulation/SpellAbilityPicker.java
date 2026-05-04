@@ -365,11 +365,15 @@ public class SpellAbilityPicker {
             // TODO: MyRandom should be an instance on the game object, so that we could do
             // simulations in parallel without messing up global state.
             MyRandom.setRandom(new Random(randomSeedToUse));
+            long t0 = System.currentTimeMillis();
             GameSimulator simulator = new GameSimulator(controller, game, player, phase);
+            long t1 = System.currentTimeMillis();
             simulator.setInterceptor(choicesIterator);
             // I feel like something here is making a wrong assumption about what the target is
             lastScore = simulator.simulateSpellAbility(sa);
+            long t2 = System.currentTimeMillis();
             numSimulations++;
+            System.out.println("[SIM_DETAIL] copy=" + (t1-t0) + "ms resolve=" + (t2-t1) + "ms");
             if (lastScore.value > bestScore.value) {
                 bestScore = lastScore;
             }

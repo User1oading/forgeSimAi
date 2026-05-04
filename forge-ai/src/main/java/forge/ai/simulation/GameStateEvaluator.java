@@ -4,6 +4,7 @@ import forge.ai.AiDeckStatistics;
 import forge.ai.CreatureEvaluator;
 import forge.card.mana.ManaAtom;
 import forge.game.Game;
+import forge.game.ability.ApiType;
 import forge.game.card.Card;
 import forge.game.card.CounterEnumType;
 import forge.game.cost.CostSacrifice;
@@ -217,14 +218,49 @@ public class GameStateEvaluator {
         } else if (c.isEnchantingCard()) {
             return 0;
         } else {
-            // TODO treat cards like Captive Audience negative
-            // e.g. a 5 CMC permanent results in 200, whereas a 5/5 creature is ~225
-            int value = 50 + 30 * c.getCMC();
-            if (c.isPlaneswalker()) {
-                value += 2 * c.getCounters(CounterEnumType.LOYALTY);
-            }
-            return value;
+            return scoreNonCreatureNonLand(c);
         }
+    }
+
+    private int scoreNonCreatureNonLand(Card c) {
+        int base = 30 + 15 * c.getCMC(); // reduced CMC weight as a floor
+
+        for (SpellAbility sa : c.getNonManaAbilities()) {
+            ApiType api = sa.getApi();
+            if (api == null) continue;
+
+            base += switch (api) {
+                // Card advantage — extremely high value
+                case Draw, Dig             -> 80;
+                case Learn, Surveil        -> 40;
+                // Removal and disruption
+                case Destroy               -> 70;
+                case Counter               -> 60;
+                case Discard               -> 40;
+                // Ramp
+                case Mana, ManaReflected   -> 60;
+                case PermanentCreature     -> 30; // token/copy generators
+                // Board-wide effects
+                case DamageAll, DestroyAll -> 90;
+                case PumpAll               -> 50;
+                // Soft control
+                case Tap, TapAll           -> 35;
+                case Fog                   -> 20;
+                default                   -> 0;
+            };
+        }
+
+        // Static abilities are especially hard to evaluate dynamically,
+        // but flagged SVars give us a hint
+        if (c.hasSVar("AICurseEffect")) {
+            base = -base; // it's hurting us, not helping
+        }
+
+        if (c.isPlaneswalker()) {
+            base += 2 * c.getCounters(CounterEnumType.LOYALTY);
+        }
+
+        return base;
     }
 
     public static int evaluateLand(Card c) {
