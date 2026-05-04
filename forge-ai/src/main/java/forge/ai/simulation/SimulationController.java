@@ -11,7 +11,7 @@ import java.util.Collections;
 import java.util.List;
 
 public class SimulationController {
-    private static boolean DEBUG = true;
+    private static boolean DEBUG = false;
     public static int MAX_DEPTH = 3;
 
     private List<Plan.Decision> currentStack;

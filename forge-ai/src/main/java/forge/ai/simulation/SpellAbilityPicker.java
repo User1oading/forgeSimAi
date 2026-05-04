@@ -184,9 +184,9 @@ public class SpellAbilityPicker {
         for (int i = 0; i < candidateSAs.size(); i++) {
             long saStart = System.currentTimeMillis();
             Score value = evaluateSa(controller, phase, candidateSAs, i);
-            System.out.println("[SIM] " + candidateSAs.get(i).getHostCard().getName()
-                    + " score=" + value.value
-                    + " time=" + (System.currentTimeMillis() - saStart) + "ms");
+            //System.out.println("[SIM] " + candidateSAs.get(i).getHostCard().getName()
+            //        + " score=" + value.value
+            //        + " time=" + (System.currentTimeMillis() - saStart) + "ms");
             if (value.value > bestSaValue.value) {
                 bestSaValue = value;
                 bestSa = candidateSAs.get(i);
@@ -194,8 +194,8 @@ public class SpellAbilityPicker {
         }
 
         long execTime = System.currentTimeMillis() - startTime;
-        System.out.println("[SIM] Total: " + execTime + "ms, " + candidateSAs.size()
-                + " candidates, " + numSimulations + " simulations, depth=" + SimulationController.MAX_DEPTH);
+        //System.out.println("[SIM] Total: " + execTime + "ms, " + candidateSAs.size()
+        //        + " candidates, " + numSimulations + " simulations, depth=" + SimulationController.MAX_DEPTH);
 
         this.bestScore = bestSaValue;
         return bestSa;

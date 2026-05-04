@@ -37,7 +37,7 @@ public class GameCopier {
         ZoneType.Battlefield,
         ZoneType.Hand,
         ZoneType.Graveyard,
-        ZoneType.Library,
+        //ZoneType.Library,
         ZoneType.Exile,
         ZoneType.Stack,
         ZoneType.Command,
@@ -133,6 +133,10 @@ public class GameCopier {
 
         for (Card c : newGame.getCardsInGame()) {
             Card origCard = (Card) reverseFind(c);
+            if (origCard == null) {
+                // Placeholder library card — no original to map, skip
+                continue;
+            }
             if (origCard.hasRemembered()) {
                 for (Object o : origCard.getRemembered()) {
                     if (o instanceof GameObject) {
@@ -243,6 +247,20 @@ public class GameCopier {
             }
             // TODO CardsAddedThisTurn is now messed up
         }
+
+        // Fill simulated library with cheap placeholders instead of copying real cards.
+        // Preserves library size for draw semantics and mill tracking without the cost
+        // of Card.fromPaperCard() on every card.
+        for (Player origPlayer : origGame.getPlayers()) {
+            Player newPlayer = playerMap.get(origPlayer);
+            int librarySize = origPlayer.getCardsIn(ZoneType.Library).size();
+            for (int i = 0; i < librarySize; i++) {
+                Card placeholder = new Card(newGame.nextCardId(), hidden_info_card, newGame);
+                placeholder.setOwner(newPlayer);
+                newPlayer.getZone(ZoneType.Library).add(placeholder);
+            }
+        }
+
         gameObjectMap = new CopiedGameObjectMap(newGame);
 
         for (Card card : origGame.getCardsIn(ZoneType.Battlefield)) {
