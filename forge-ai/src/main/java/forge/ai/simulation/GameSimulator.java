@@ -248,7 +248,7 @@ public class GameSimulator {
                 && score.value != Integer.MIN_VALUE
                 && score.value >= controller.getBestScore().value - Math.max(20, Math.abs(controller.getBestScore().value / 20))) {
             controller.push(sa, score, this);
-            SpellAbilityPicker sim = new SpellAbilityPicker(simGame, aiPlayer, 3);
+            SpellAbilityPicker sim = new SpellAbilityPicker(simGame, aiPlayer);
             SpellAbility nextSa = sim.chooseSpellAbilityToPlay(controller);
             if (nextSa != null) {
                 score = sim.getScoreForChosenAbility();

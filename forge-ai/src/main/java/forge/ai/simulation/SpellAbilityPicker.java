@@ -32,10 +32,9 @@ public class SpellAbilityPicker {
     private int numSimulations;
     private int maxCandidates = 7;
 
-    public SpellAbilityPicker(Game game, Player player , int maxCandidates) {
+    public SpellAbilityPicker(Game game, Player player) {
         this.game = game;
         this.player = player;
-        this.maxCandidates = maxCandidates;
     }
 
     public void setInterceptor(SpellAbilityChoicesIterator in) {
